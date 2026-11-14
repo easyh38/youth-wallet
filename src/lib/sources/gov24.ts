@@ -10,7 +10,29 @@ type Raw = Record<string, unknown>;
 // MAX_PAGES는 API가 totalCount를 잘못 줄 때 무한 반복을 막는 안전장치
 const PER_PAGE = 1000;
 const MAX_PAGES = 30;
-const YOUTH_RE = /청년|대학생|대학원생|사회초년|신혼|구직|취업준비|자립준비/;
+// 청년 서비스 판별 (실데이터 10,942건으로 검증, 2026-11)
+// - 강한 키워드: 거의 항상 청년 대상 → 무조건 통과
+//   ("청년 행정체험단"은 급여 있는 일자리, "청년문화예술패스"는 관람 지원이므로 강한 쪽엔 제외 규칙을 걸지 않는다)
+// - 약한 키워드: "초·중·고·대학생 누구나"처럼 청년이 여러 대상 중 하나일 때가 많다.
+//   학자금대출·국가장학금·버팀목전세처럼 진짜 정책도 많아 기본은 통과, 확실한 잡음만 뺀다.
+//   나이 숫자는 제외 조건("75세 이상 제외")이나 부모 나이로도 쓰여 오판이 잦으므로 "40~59세"처럼 범위일 때만 본다.
+const STRONG_RE = /청년|사회초년|자립준비/;
+const WEAK_RE = /대학생|대학원생|신혼|구직|취업준비/;
+const NOT_BENEFIT_TITLE_RE = /견학|관람|공연|전시|축제|행사|대장정|인식개선|홍보/;
+const OTHER_GROUP_TITLE_RE = /중장년|노인|어르신|시니어|퇴직/;
+const AGE_RANGE_RE = /만?(\d{2})세?(?:이상)?[~∼\-–부터]+만?\d{2}세/;
+
+export function isYouthService(r: Raw): boolean {
+  const title = clean(r["서비스명"]);
+  const target = clean(r["지원대상"]);
+  const text = `${title} ${target} ${clean(r["서비스목적요약"])}`;
+  if (STRONG_RE.test(text)) return true;
+  if (!WEAK_RE.test(text)) return false;
+  if (NOT_BENEFIT_TITLE_RE.test(title) || OTHER_GROUP_TITLE_RE.test(title)) return false;
+  const range = target.replace(/\s/g, "").match(AGE_RANGE_RE);
+  if (range && +range[1] >= 40) return false;
+  return true;
+}
 
 export async function fetchGov24(): Promise<Policy[]> {
   const key = process.env.GOV24_API_KEY!;
@@ -26,7 +48,7 @@ export async function fetchGov24(): Promise<Policy[]> {
     if (data.length < PER_PAGE || all.length >= (json.totalCount ?? 0)) break;
   }
   return all
-    .filter((r) => YOUTH_RE.test(`${clean(r["서비스명"])} ${clean(r["지원대상"])} ${clean(r["서비스목적요약"])}`))
+    .filter(isYouthService)
     .map(normalizeGov24);
 }
 
