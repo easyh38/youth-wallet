@@ -1,9 +1,9 @@
 "use client";
 
-import { Info, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
+import { Info, Search, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { PolicyCard, type CardSummary } from "@/components/policy-card";
 import { PolicyDetail } from "@/components/policy-detail";
 import { ButtonLink, cx, EmptyState, ErrorBox, PolicyCardSkeleton } from "@/components/ui";
@@ -11,6 +11,7 @@ import { api, resolveProfile } from "@/lib/client";
 import { formatWon } from "@/lib/format";
 import type { MatchedPolicy } from "@/lib/match";
 import { regionName } from "@/lib/regions";
+import { searchPolicies } from "@/lib/search";
 import {
   CATEGORY_LABEL, INTEREST_TO_CATEGORY, SOURCE_LABEL,
   type Category, type MatchStatus, type Source, type UserProfile,
@@ -107,6 +108,9 @@ export default function PoliciesPage() {
   const [sourceF, setSourceF] = useState<Source[]>(["youth", "gov24", "kosaf"]);
   const [sheet, setSheet] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const searching = deferredQuery.trim().length > 0;
 
   const run = useCallback(async (p: UserProfile) => {
     setErr("");
@@ -137,14 +141,21 @@ export default function PoliciesPage() {
 
   const visible = useMemo(() => {
     if (!data) return [];
-    return data.results.filter((r) => {
+    const filtered = data.results.filter((r) => {
       if (statusF !== "all" && r.status !== statusF) return false;
       if (!sourceF.includes(r.policy.source)) return false;
       if (tab === "interest") return interestCats.has(r.policy.category);
       if (tab !== "all") return r.policy.category === tab;
       return true;
     });
-  }, [data, statusF, sourceF, tab, interestCats]);
+    return searchPolicies(filtered, deferredQuery);
+  }, [data, statusF, sourceF, tab, interestCats, deferredQuery]);
+
+  function onSearch(value: string) {
+    setQuery(value);
+    // 검색은 분야와 상관없이 전체에서 찾는다 (필요하면 탭을 눌러 다시 좁힐 수 있다)
+    if (value.trim() && !query.trim() && tab !== "all") setTab("all");
+  }
 
   const tabs: { v: Tab; label: string }[] = [
     ...(interestCats.size ? [{ v: "interest" as Tab, label: "관심 분야" }] : []),
@@ -223,6 +234,40 @@ export default function PoliciesPage() {
       )}
       {err && <div className="mb-4"><ErrorBox>{err}</ErrorBox></div>}
 
+      {/* 정책 이름 검색 */}
+      <form role="search" className="mb-2" onSubmit={(e) => e.preventDefault()}>
+        <label htmlFor="policy-search" className="sr-only">정책 검색</label>
+        <div className="relative max-w-xl">
+          <Search size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden />
+          <input
+            id="policy-search"
+            type="search"
+            value={query}
+            onChange={(e) => onSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && onSearch("")}
+            placeholder="정책 이름으로 찾기 (예: 학자금 대출, 월세)"
+            autoComplete="off"
+            enterKeyHint="search"
+            className="min-h-12 w-full rounded-full border border-line bg-surface pl-11 pr-12 text-base focus:border-ink focus:outline-2 focus:outline-ink [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => onSearch("")}
+              aria-label="검색어 지우기"
+              className="absolute right-1 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-ink-muted hover:bg-line-soft"
+            >
+              <X size={18} aria-hidden />
+            </button>
+          )}
+        </div>
+        {data && searching && (
+          <p className="mt-2 px-1 text-sm text-ink-muted" aria-live="polite">
+            ‘{deferredQuery.trim()}’ 검색 결과 <span className="tnum font-semibold text-ink">{visible.length}</span>개
+          </p>
+        )}
+      </form>
+
       {/* 분야 탭 */}
       <div className="sticky top-14 z-20 -mx-4 mb-6 flex items-center gap-2 bg-paper/95 px-4 py-3 backdrop-blur lg:-mx-6 lg:px-6">
         <div role="tablist" aria-label="분야" className="flex flex-1 gap-2 overflow-x-auto [scrollbar-width:none]">
@@ -285,13 +330,23 @@ export default function PoliciesPage() {
               />
             ))}
           </div>
-          {data && visible.length === 0 && (
+          {data && visible.length === 0 && (searching ? (
+            <EmptyState
+              title={`‘${deferredQuery.trim()}’에 맞는 정책이 없어요`}
+              body={
+                tab !== "all" || statusF !== "all" || sourceF.length < 3
+                  ? "분야·필터를 ‘전체’로 바꾸거나 다른 단어로 찾아보세요."
+                  : "다른 단어로 찾아보세요. 내 조건(지역·나이·신청 기간)에 맞지 않는 정책은 검색되지 않아요."
+              }
+              action={<button type="button" onClick={() => onSearch("")} className="min-h-11 rounded-full border border-line bg-surface px-5 text-sm font-semibold hover:bg-paper">검색어 지우기</button>}
+            />
+          ) : (
             <EmptyState
               title="조건에 맞는 정책이 없어요"
               body={tab !== "all" || statusF !== "all" ? "다른 분야나 필터를 골라 보세요." : "조건을 바꿔 다시 찾아보세요."}
               action={<ButtonLink href="/profile" variant="secondary">조건 바꾸기</ButtonLink>}
             />
-          )}
+          ))}
           {kosaf?.fetchedAt && (
             <p className="mt-8 text-[13px] text-ink-muted lg:hidden">
               장학재단 데이터 기준일 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")} · 실시간이 아니며 일부 기관만 포함돼요.

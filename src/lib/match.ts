@@ -41,6 +41,42 @@ function checkPeriod(policy: Policy, today: string): Verdict {
 }
 
 /**
+ * 프로필에서 묻지 않는 특정 대상 조건. 정책명이나 지원대상에 이런 말이 있으면
+ * 사용자가 해당되는지 알 수 없으므로 "신청 가능"이 아니라 "조건 확인 필요"로 둔다.
+ */
+export const SPECIAL_TARGETS: { label: string; re: RegExp }[] = [
+  { label: "북한이탈주민", re: /북한\s*이탈|탈북|새터민/ },
+  { label: "자립준비청년(보호종료아동)", re: /자립\s*준비|보호\s*종료|보호\s*대상\s*아동|가정\s*위탁|아동\s*양육\s*시설/ },
+  // "경도인지장애" 같은 질환명은 빼고 장애인·장애학생 등만
+  { label: "장애인", re: /장애인|장애\s*(?:아동|학생|대학|청년|가구|가정|정도|등급)|발달\s*장애/ },
+  // "구직급여 수급자"는 실업급여라서 해당 없음. 기초생활보장 급여 수급만
+  { label: "기초생활수급자·차상위계층", re: /기초\s*생활|생계\s*급여|의료\s*급여|주거\s*급여|교육\s*급여|차상위/ },
+  { label: "한부모·조손가정", re: /한\s*부모|조손/ },
+  { label: "다문화가족·결혼이민자", re: /다문화|결혼\s*이민|이주\s*배경/ },
+  { label: "국가유공자·보훈대상자", re: /유공자|보훈|참전/ },
+  { label: "유가족·유자녀", re: /유가족|유족|유자녀/ },
+  // "영농 기술을 배우려는 청년"처럼 누구나 되는 경우가 있어 '영농'은 뺀다
+  { label: "농어업인", re: /농업인|어업인|임업인|귀농|귀어|후계\s*농/ },
+  { label: "신혼부부·임신·출산·자녀양육 가구", re: /신혼\s*부부|임산부|임신|출산|다자녀|영유아/ },
+  // "경기도 전역"의 '전역'은 빼고 전역 예정자·제대군인만
+  { label: "군 장병·제대군인", re: /장병|제대\s*군인|군\s*복무|전역\s*(?:예정|장병|군인|간부|자)/ },
+  { label: "특정 직업 종사자", re: /종사자|교직원|건설\s*노동자|운전자/ },
+];
+
+/** 정책명 + 지원대상 문장 (선정기준의 "우대" 같은 부가 조건까지 보지 않도록 지원대상만) */
+function targetText(policy: Policy): string {
+  const line = policy.summaryRaw.match(/^지원\s*대상\s*[:：]\s*([^\n]+)/m)?.[1];
+  return `${policy.title}\n${line ?? policy.summaryRaw.slice(0, 300)}`;
+}
+
+export function specialTargets(policy: Policy): string[] {
+  const text = targetText(policy);
+  // "영유아, 청소년, 청년, 노인 등 전 국민 대상"처럼 누구나 되는 정책은 특정 대상이 아니다
+  if (/전\s*국민|국민\s*누구나|누구나/.test(text)) return [];
+  return SPECIAL_TARGETS.filter((t) => t.re.test(text)).map((t) => t.label);
+}
+
+/**
  * 프로필과 정책을 비교해 신청 가능 / 조건 확인 필요 / 제외로 분류한다. (PRD 6-3)
  * - 나이·지역·신청 기간이 명확히 어긋나면 제외
  * - 판단할 수 없는 조건이 있거나 사용자가 "모름"을 골랐으면 확인 필요
@@ -78,6 +114,10 @@ export function matchPolicy(profile: UserProfile, policy: Policy, today: string 
   else if (policy.employmentStatus && !policy.employmentStatus.includes(profile.employmentStatus)) {
     reasons.push(`취업 상태 조건: ${policy.employmentStatus.join("·")}`);
   }
+
+  const special = specialTargets(policy);
+  // "청년, 신혼부부, 한부모가족"처럼 여러 대상 중 하나일 수도 있어 '대상'이라고 단정하지 않는다
+  if (special.length) reasons.push(`${special.join(", ")} 관련 조건이 있어요. 해당되는지 확인하세요`);
 
   const status: MatchStatus = excluded ? "excluded" : reasons.length > 0 ? "check" : "eligible";
   return { status, reasons: excluded ? reasons.filter((r) => !r.includes("확인")) : reasons };

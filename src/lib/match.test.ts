@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchAll, matchPolicy, sortMatched } from "./match";
+import { matchAll, matchPolicy, sortMatched, specialTargets } from "./match";
 import type { Policy, UserProfile } from "./types";
 
 const TODAY = "2026-11-12";
@@ -139,5 +139,33 @@ describe("정렬", () => {
     ];
     sortMatched(arr);
     expect(arr[0].policy.id).toBe("1");
+  });
+});
+
+describe("특정 대상 조건 (프로필에서 묻지 않는 조건)", () => {
+  const status = (over: Partial<Policy>) => matchPolicy(profile, p(over), TODAY);
+
+  it("정책명이나 지원대상에 특정 대상이 있으면 확인 필요", () => {
+    const r = status({ title: "북한이탈주민 교육지원금 지원", summaryRaw: "지원대상: ○ 북한이탈주민 대학생" });
+    expect(r.status).toBe("check");
+    expect(r.reasons.join()).toContain("북한이탈주민");
+    expect(status({ title: "자립준비청년 자립수당 지급" }).status).toBe("check");
+    expect(status({ title: "장애인 취업성공패키지" }).status).toBe("check");
+    expect(status({ summaryRaw: "지원대상: 생계급여, 의료급여 수급자" }).status).toBe("check");
+  });
+
+  it("비슷한 말이지만 특정 대상이 아닌 경우는 그대로", () => {
+    // 실업급여 수급자, 질환명, '영농 기술을 배우려는 청년', '경기도 전역'
+    expect(specialTargets(p({ title: "실업크레딧", summaryRaw: "지원대상: 구직급여 수급자" }))).toEqual([]);
+    expect(specialTargets(p({ summaryRaw: "지원대상: 경도인지장애 위험 청년" }))).toEqual([]);
+    expect(specialTargets(p({ summaryRaw: "지원대상: 스마트팜 영농 기술을 배우고자 하는 청년" }))).toEqual([]);
+    expect(specialTargets(p({ summaryRaw: "지원대상: 경기도 전역 거주 청년" }))).toEqual([]);
+    expect(specialTargets(p({ summaryRaw: "지원대상: 영유아, 청소년, 청년 등 전 국민 대상" }))).toEqual([]);
+    expect(status({ title: "일반 상환 학자금대출", summaryRaw: "지원대상: 국내 대학 학부생" }).status).toBe("eligible");
+  });
+
+  it("지원대상 줄만 보고 선정기준의 우대 조건은 보지 않는다", () => {
+    const summaryRaw = "지원대상: 만 19세~34세 청년\n선정기준: 장애인, 한부모가족 우선 선발";
+    expect(specialTargets(p({ summaryRaw }))).toEqual([]);
   });
 });
