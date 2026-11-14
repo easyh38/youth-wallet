@@ -3,7 +3,7 @@
 
 import type { Policy, UnknownField } from "../types";
 import { normalizeDate } from "../date";
-import { clean, parseAmountMax, pushUnknown, regionsFromText } from "./parse";
+import { clean, parseAmountMax, pushUnknown, regionsFromRegionText } from "./parse";
 
 type Raw = Record<string, unknown>;
 
@@ -44,7 +44,7 @@ export function normalizeKosaf(r: Raw, index = 0): Policy {
   const incomeMax = m ? +m[1] : null;
   pushUnknown(unknown, !m && !!income && !/해당\s*없|무관|제한\s*없/.test(income), "income");
 
-  const regionCodes = !regionText || /해당\s*없|무관|제한\s*없/.test(regionText) ? ["ALL"] : regionsFromText(regionText) ?? [];
+  const regionCodes = !regionText || /해당\s*없|무관|제한\s*없/.test(regionText) ? ["ALL"] : regionsFromRegionText(regionText, org);
   pushUnknown(unknown, regionCodes.length === 0, "region");
 
   const start = normalizeDate(pick(r, "모집시작일"));

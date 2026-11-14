@@ -2,7 +2,7 @@
 // 원칙: 확실히 읽히는 것만 숫자로 바꾸고, 애매하면 null + unknownFields 로 둔다. (PRD 6-2)
 
 import { normalizeDate } from "../date";
-import { REGIONS, SIDO_ALIASES } from "../regions";
+import { REGIONS, SIDO_ALIASES, allSigungu } from "../regions";
 import type { Category, UnknownField } from "../types";
 
 export function clean(s: unknown): string {
@@ -48,7 +48,8 @@ export function regionsFromText(text: string): string[] | null {
  * - 시군구: "서울특별시 강서구" → 해당 시·군·구 코드. 지역 표에 없는 시·군·구는 "41:연천군" 형태로 둔다
  *   (사용자는 표에 있는 시·군·구만 고를 수 있으므로 누구와도 일치하지 않아 제외된다)
  * - 광역시도·교육청: 시·도 코드
- * - 출자·출연기관, 지방공기업: 이름만으로는 범위가 불확실해 [] (조건 확인 필요)
+ * - 출자·출연기관, 지방공기업: 기관 이름 앞부분의 지역명으로 정한다 ("대전일자리경제진흥원" → 대전).
+ *   이름에 지역이 없으면 [] (조건 확인 필요)
  * - 중앙행정기관·공공기관 등: 전국
  */
 export function regionsFromAgency(agency: string, type: string): string[] {
@@ -58,14 +59,93 @@ export function regionsFromAgency(agency: string, type: string): string[] {
   if (/시군구/.test(type)) {
     const name = agency.trim().split(/\s+/)[1];
     if (!name || !sidoCodes.length) return [];
-    for (const sido of REGIONS.filter((r) => sidoCodes.includes(r.code))) {
-      const hit = sido.sigungu.find((g) => g.name === name);
+    for (const sido of sidoCodes) {
+      const hit = allSigungu(sido).find((g) => g.name === name);
       if (hit) return [hit.code];
     }
     return [`${sidoCodes[0]}:${name}`];
   }
   if (/광역시도|교육청/.test(type)) return sidoCodes;
-  return [];
+  return regionsFromName(agency);
+}
+
+// 이름 앞에 오는 시·도 표기. 긴 것부터 맞춰 본다 ("경상북도"가 "경북"보다 먼저)
+const SHORT_FORMS = ["경기도", "강원도", "제주도", "서울시", "부산시", "대구시", "인천시", "대전시", "울산시", "세종시"];
+const SIDO_PREFIXES: [string, string[]][] = (
+  [
+    ["전남광주통합특별시", ["29", "46"]],
+    ...REGIONS.map((r): [string, string[]] => [r.name, [r.code]]),
+    ...Object.entries(SIDO_ALIASES).map(([name, code]): [string, string[]] => [name, [code]]),
+    ...SHORT_FORMS.map((name): [string, string[]] => [name, [SIDO_ALIASES[name.slice(0, 2)]]]),
+  ] as [string, string[]][]
+).sort((a, b) => b[0].length - a[0].length);
+
+const ORG_PREFIX = /^(?:\s|\(재\)|\(사\)|\(주\)|재단법인|사단법인|주식회사)+/;
+const NOT_AFTER_HANGUL = "(?<![가-힣])";
+
+/** "광주시"만 보고는 경기 광주시인지 광주광역시인지 모른다. 경기 힌트가 없으면 둘 다 둔다 */
+function withGwangjuAmbiguity(codes: string[], sidoHint: string[]): string[] {
+  if (codes.includes("41610") && !sidoHint.includes("41") && !codes.includes("29")) return [...codes, "29"];
+  return codes;
+}
+
+/** 이름 맨 앞이 시·군·구 이름(또는 "목포"처럼 시·군·구를 뗀 두 글자 이상)이면 그 코드 */
+function sigunguAtStart(text: string, sidoCodes: string[]): string[] {
+  const out: string[] = [];
+  for (const sido of sidoCodes) {
+    for (const g of allSigungu(sido)) {
+      const stem = g.name.slice(0, -1);
+      if (text.startsWith(g.name) || (stem.length >= 2 && text.startsWith(stem))) out.push(g.code);
+    }
+  }
+  return out;
+}
+
+const ALL_SIDO_CODES = REGIONS.map((r) => r.code);
+
+/**
+ * 기관 이름으로 지역을 정한다. 이름 맨 앞만 본다 (중간에 나오는 단어는 지역명이 아닐 수 있어서).
+ * "경북신용보증재단" → 경북, "(재)대구동구교육재단" → 대구 동구, "횡성인재육성장학회" → 강원 횡성군
+ * 못 찾으면 []
+ */
+export function regionsFromName(name: string): string[] {
+  const s = name.replace(ORG_PREFIX, "");
+  const prefix = SIDO_PREFIXES.find(([p]) => s.startsWith(p));
+  if (prefix) {
+    const [p, sidoCodes] = prefix;
+    const rest = s.slice(p.length).replace(/^(?:특별자치시|특별자치도|특별시|광역시|도)?\s*/, "");
+    const sg = sigunguAtStart(rest, sidoCodes);
+    return sg.length ? sg : sidoCodes;
+  }
+  return withGwangjuAmbiguity(sigunguAtStart(s, ALL_SIDO_CODES), []);
+}
+
+/** 텍스트 안에 나오는 시·군·구 전체 이름("원주시", "고성군")을 찾는다. sidoHint가 있으면 그 시·도 안에서만 */
+export function sigunguInText(text: string, sidoHint: string[] = []): string[] {
+  const sidos = sidoHint.length ? sidoHint : ALL_SIDO_CODES;
+  const out: string[] = [];
+  for (const sido of sidos) {
+    for (const g of allSigungu(sido)) {
+      // "강남구" 안의 "남구"처럼 다른 이름의 일부로 들어간 경우는 뺀다
+      if (new RegExp(NOT_AFTER_HANGUL + g.name).test(text)) out.push(g.code);
+    }
+  }
+  return withGwangjuAmbiguity(out, sidoHint);
+}
+
+/**
+ * 장학금 지역 기준 문구 + 운영기관 이름으로 대상 지역을 정한다.
+ * 1) 문구에 시·군·구 이름이 있으면 그 시·군·구  2) 시·도 이름이 있으면 그 시·도
+ * 3) "관내 거주"처럼 지역명이 없으면 운영기관 이름의 지역  4) 그래도 없으면 [] (조건 확인 필요)
+ */
+export function regionsFromRegionText(text: string, org: string): string[] {
+  const fromText = regionsFromText(text);
+  if (fromText?.includes("ALL")) return ["ALL"];
+  const fromOrg = regionsFromName(org);
+  const hint = [...new Set([...(fromText ?? []), ...fromOrg.map((c) => c.slice(0, 2))])];
+  const sg = sigunguInText(text, hint);
+  if (sg.length) return sg;
+  return fromText ?? fromOrg;
 }
 
 const CATEGORY_RULES: [Category, RegExp][] = [
