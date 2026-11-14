@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // Neon pooled 연결 (앱이 사용)
+  directUrl = env("DATABASE_URL_UNPOOLED") // Neon direct 연결 (마이그레이션용)
+}
+
+model User {
+  id            String               @id @default(cuid())
+  email         String               @unique
+  passwordHash  String
+  agreedAt      DateTime             @default(now()) // 개인정보 수집·이용 동의 시각
+  createdAt     DateTime             @default(now())
+  profile       Profile?
+  saved         SavedPolicy[]
+  notifications Notification[]
+  settings      NotificationSetting?
+}
+
+model Profile {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  regionCode       String
+  birthYear        Int
+  incomeLevel      Int?
+  studentStatus    String
+  employmentStatus String
+  interests        String // JSON 배열 문자열
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PolicySummary {
+  policyId     String   @id
+  sourceHash   String
+  target       String?
+  amount       String?
+  deadline     String?
+  isAlwaysOpen Boolean
+  documents    String // JSON 배열 문자열
+  applyMethod  String?
+  engine       String   @default("factchat") // factchat / rule(키가 없을 때 규칙 기반)
+  createdAt    DateTime @default(now())
+}
+
+model SavedPolicy {
+  id        String          @id @default(cuid())
+  userId    String
+  policyId  String
+  snapshot  String // 저장 시점 Policy (JSON)
+  deadline  DateTime?
+  status    String          @default("saved") // saved / applied
+  createdAt DateTime        @default(now())
+  checklist ChecklistItem[]
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, policyId])
+}
+
+model ChecklistItem {
+  id            String      @id @default(cuid())
+  savedPolicyId String
+  name          String
+  isChecked     Boolean     @default(false)
+  isCustom      Boolean     @default(false)
+  order         Int
+  savedPolicy   SavedPolicy @relation(fields: [savedPolicyId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  policyId  String
+  type      String // D7 / D3 / D1
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, policyId, type])
+}
+
+model NotificationSetting {
+  userId  String  @id
+  d7      Boolean @default(true)
+  d3      Boolean @default(true)
+  d1      Boolean @default(true)
+  emailOn Boolean @default(false)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── 서버 캐시용 (PRD 6-2, 6-4) ───
+
+// 공공 API 응답 캐시 (온통청년·보조금24 6시간, 장학재단 하루 1회)
+model SourceCache {
+  source    String   @id // youth / gov24 / kosaf
+  data      String // 변환된 Policy[] (JSON)
+  fetchedAt DateTime
+  isSample  Boolean  @default(false)
+}
+
+// 팩트챗 하루 호출 수 (한국 시간 기준 날짜)
+model ApiUsage {
+  date  String @id // YYYY-MM-DD
+  count Int    @default(0)
+}

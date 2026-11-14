@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 그대로 가져온 stageshow 키트 (MIT, 서드파티 코드)
+    "src/stageshow/kit/**",
   ]),
 ]);
 

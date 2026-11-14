@@ -1,26 +1,139 @@
 @import "tailwindcss";
 
+/* PRD 7. 디자인 가이드 — Ramp 팔레트 기반 토큰 */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #1a1919;
+  --ink-muted: #6e6a68;
+  --paper: #f4f2f0;
+  --surface: #ffffff;
+  --line: #d2cecb;
+  --line-soft: #e7e4e1;
+  --accent: #e4f222;
+  --accent-soft: #f5ff78;
+  --on-accent: #1a1919;
+  --highlight: #f5ff78;
+  --info-bg: #e4ebf6;
+  --info: #3b63b8;
+  --deep: #17332d;
+  --on-deep: #ffffff;
+  --ok-bg: #e7f4ec;
+  --ok: #166534;
+  --ok-bar: #1a7f45;
+  --warn-bg: #fdf0e6;
+  --warn: #9a4a0a;
+  --urgent-bg: #fdecea;
+  --urgent: #b42318;
+  --skeleton: #e7e4e1;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* 다크 모드 (선택 기능) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --ink: #f4f2f0;
+    --ink-muted: #a8a29e;
+    --paper: #1a1919;
+    --surface: #262423;
+    --line: #3d3a38;
+    --line-soft: #312e2d;
+    --info-bg: #1e2a40;
+    --info: #9db8f0;
+    --deep: #102420;
+    --ok-bg: #16322a;
+    --ok: #86e0ad;
+    --ok-bar: #3fbf78;
+    --warn-bg: #3a2814;
+    --warn: #f5b97a;
+    --urgent-bg: #3d1a17;
+    --urgent: #ff9b8f;
+    --skeleton: #312e2d;
+    --highlight: rgba(228, 242, 34, 0.3);
+    color-scheme: dark;
   }
 }
 
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-info-bg: var(--info-bg);
+  --color-info: var(--info);
+  --color-deep: var(--deep);
+  --color-on-deep: var(--on-deep);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok: var(--ok);
+  --color-ok-bar: var(--ok-bar);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn: var(--warn);
+  --color-urgent-bg: var(--urgent-bg);
+  --color-urgent: var(--urgent);
+  --color-skeleton: var(--skeleton);
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* 키보드 포커스 링: ink 2px + 2px 간격 */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 큰 제목: 자간 좁게 */
+.display {
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+/* 스켈레톤 은은하게 깜빡임 */
+@keyframes pulse-soft {
+  50% { opacity: 0.55; }
+}
+.skeleton {
+  background: var(--skeleton);
+  border-radius: 6px;
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+/* 하단 시트 / 패널 등장 */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.anim-sheet { animation: sheet-up 200ms ease-out; }
+.anim-fade { animation: fade-in 150ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
