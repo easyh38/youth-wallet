@@ -27,7 +27,15 @@ export type Policy = {
   /** 아래는 PRD 구조에 더한 보조 필드 */
   unknownFields?: UnknownField[];
   amountMax?: number | null; // 원 단위, 원본에 숫자로 있을 때만
+  /** 원본 API가 항목별로 나눠 준 정보 (온통청년: 지원 내용·신청 방법·제출 서류 등). 상세 화면에 그대로 보여준다 */
+  details?: PolicyDetailItem[];
+  /** 정책 키워드 (온통청년 plcyKywdNm) */
+  keywords?: string[];
+  /** 신청·참고 링크 (detailUrl 외에 더 있을 때) */
+  links?: { label: string; url: string }[];
 };
+
+export type PolicyDetailItem = { label: string; value: string };
 
 export const STUDENT_STATUSES = ["재학", "휴학", "졸업예정", "졸업", "해당 없음"] as const;
 export const EMPLOYMENT_STATUSES = ["미취업", "재직", "창업 준비", "자영업"] as const;

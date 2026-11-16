@@ -9,8 +9,17 @@ import type { Policy, Source } from "./types";
 
 const HOUR = 3_600_000;
 
-const SOURCES: Record<Source, { ttl: number; hasKey: () => boolean; fetch: () => Promise<Policy[]> }> = {
-  youth: { ttl: 6 * HOUR, hasKey: () => !!process.env.YOUTH_API_KEY, fetch: fetchYouth },
+type SourceConfig = {
+  ttl: number;
+  hasKey: () => boolean;
+  fetch: () => Promise<Policy[]>;
+  /** 캐시가 지금 코드의 형식으로 저장됐는지. 아니면 만료 전이라도 다시 받는다 */
+  current?: (cached: Policy[]) => boolean;
+};
+
+const SOURCES: Record<Source, SourceConfig> = {
+  // 항목별 상세(details)가 없는 옛 형식 캐시는 다시 받는다
+  youth: { ttl: 6 * HOUR, hasKey: () => !!process.env.YOUTH_API_KEY, fetch: fetchYouth, current: (c) => !c.length || !!c[0].details },
   gov24: { ttl: 6 * HOUR, hasKey: () => !!process.env.GOV24_API_KEY, fetch: fetchGov24 },
   kosaf: {
     ttl: 24 * HOUR,
@@ -39,9 +48,9 @@ async function loadSource(source: Source): Promise<{ policies: Policy[]; status:
   }
 
   const cached = await prisma.sourceCache.findUnique({ where: { source } });
-  const fresh = cached && !cached.isSample && Date.now() - cached.fetchedAt.getTime() < cfg.ttl;
-  if (fresh) {
-    const policies = JSON.parse(cached.data) as Policy[];
+  const cachedPolicies = cached && !cached.isSample ? (JSON.parse(cached.data) as Policy[]) : null;
+  if (cached && cachedPolicies && Date.now() - cached.fetchedAt.getTime() < cfg.ttl && (cfg.current?.(cachedPolicies) ?? true)) {
+    const policies = cachedPolicies;
     return { policies, status: { source, ok: true, isSample: false, fetchedAt: cached.fetchedAt.toISOString(), count: policies.length } };
   }
 
@@ -57,8 +66,8 @@ async function loadSource(source: Source): Promise<{ policies: Policy[]; status:
   } catch (err) {
     console.error(`[policies] ${source} 불러오기 실패:`, (err as Error).message);
     // 실패하면 오래된 캐시라도 보여준다. 그것도 없으면 이 출처만 비운다.
-    if (cached && !cached.isSample) {
-      const policies = JSON.parse(cached.data) as Policy[];
+    if (cached && cachedPolicies) {
+      const policies = cachedPolicies;
       return { policies, status: { source, ok: false, isSample: false, fetchedAt: cached.fetchedAt.toISOString(), count: policies.length } };
     }
     return { policies: [], status: { source, ok: false, isSample: false, fetchedAt: null, count: 0 } };
@@ -96,6 +105,12 @@ export function sanitizePolicy(p: Policy): Policy {
     summaryRaw: p.summaryRaw.slice(0, 20_000),
     detailUrl: safeHttpUrl(p.detailUrl, FALLBACK_URL[p.source]),
     attachmentUrls: p.attachmentUrls.filter(isPublicFetchUrl).slice(0, 5),
+    details: p.details?.slice(0, 30).map((d) => ({ label: d.label.slice(0, 30), value: d.value.slice(0, 4_000) })),
+    keywords: p.keywords?.slice(0, 10).map((k) => k.slice(0, 30)),
+    links: p.links
+      ?.map((l) => ({ label: l.label.slice(0, 30), url: safeHttpUrl(l.url, "") }))
+      .filter((l) => l.url)
+      .slice(0, 5),
   };
 }
 

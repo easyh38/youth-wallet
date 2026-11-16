@@ -4,7 +4,7 @@ import { ExternalLink, FileText, Info, ListChecks, LoaderCircle, TriangleAlert, 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/client";
 import { ddayInfo, formatDate } from "@/lib/format";
-import { regionName } from "@/lib/regions";
+import { regionLabel } from "@/lib/regions";
 import { CATEGORY_LABEL, type Policy, type Summary } from "@/lib/types";
 import { Checklist, type ChecklistItemT } from "./checklist";
 import { SaveButton } from "./save-button";
@@ -76,7 +76,8 @@ export function PolicyDetail({
   const { policy: p, summary, saved } = data;
   const dd = ddayInfo(p.applyEnd, p.isAlwaysOpen);
   const deadlineMismatch = !!summary?.deadline && !!p.applyEnd && summary.deadline !== p.applyEnd;
-  const regions = p.regionCodes.includes("ALL") ? "전국" : p.regionCodes.length ? p.regionCodes.map(regionName).join(", ") : "공고문 확인 필요";
+  const regions = regionLabel(p.regionCodes, 6);
+  const links = (p.links ?? []).filter((l) => l.url !== p.detailUrl);
 
   return (
     <article className="flex flex-col gap-8 p-5 sm:p-6">
@@ -96,6 +97,13 @@ export function PolicyDetail({
         </div>
         <h1 className="display text-[24px] sm:text-[28px]">{p.title}</h1>
         <p className="text-sm text-ink-muted">{p.agency} · {regions}</p>
+        {!!p.keywords?.length && (
+          <ul className="flex flex-wrap gap-1.5" aria-label="정책 키워드">
+            {p.keywords.map((k) => (
+              <li key={k} className="rounded-full bg-line-soft px-2.5 py-0.5 text-[12px] text-ink-muted">#{k}</li>
+            ))}
+          </ul>
+        )}
         {!p.isAlwaysOpen && (p.applyStart || p.applyEnd) && (
           <p className="tnum text-sm">
             신청 기간 {formatDate(p.applyStart) || "공고문 확인"} ~ {formatDate(p.applyEnd) || "공고문 확인"}
@@ -179,13 +187,31 @@ export function PolicyDetail({
         />
       )}
 
-      {/* 원본 설명 */}
-      <section aria-labelledby="raw-h" className="flex flex-col gap-2">
-        <h2 id="raw-h" className="text-[17px] font-semibold">원본 설명</h2>
-        <p className="text-sm whitespace-pre-line text-ink-muted">{p.summaryRaw || "원문 사이트에서 확인해 주세요."}</p>
-        <a href={p.detailUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 self-start text-sm font-medium text-info underline underline-offset-4">
-          원문 링크 열기 <ExternalLink size={14} aria-hidden />
-        </a>
+      {/* 원본 정보: 항목별로 받은 출처(온통청년)는 표로, 아니면 원문 설명 그대로 */}
+      <section aria-labelledby="raw-h" className="flex flex-col gap-3">
+        <h2 id="raw-h" className="text-[17px] font-semibold">{p.details?.length ? "정책 정보" : "원본 설명"}</h2>
+        {p.details?.length ? (
+          <dl className="divide-y divide-line-soft rounded-xl border border-line bg-surface">
+            {p.details.map((d) => (
+              <div key={d.label} className="grid gap-1 px-4 py-3 sm:grid-cols-[7.5rem_1fr] sm:gap-4">
+                <dt className="text-sm font-semibold text-ink-muted">{d.label}</dt>
+                <dd className="text-[15px] whitespace-pre-line break-words">{d.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="text-sm whitespace-pre-line text-ink-muted">{p.summaryRaw || "원문 사이트에서 확인해 주세요."}</p>
+        )}
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+          <a href={p.detailUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-info underline underline-offset-4">
+            원문 링크 열기 <ExternalLink size={14} aria-hidden />
+          </a>
+          {links.map((l) => (
+            <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-info underline underline-offset-4">
+              {l.label} <ExternalLink size={14} aria-hidden />
+            </a>
+          ))}
+        </div>
       </section>
     </article>
   );

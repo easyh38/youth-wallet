@@ -1,4 +1,5 @@
 import { ageRangeFromBirthYear, kstDate } from "./date";
+import { LEGACY_SIGUNGU } from "./regions";
 import type { MatchResult, MatchStatus, Policy, UserProfile } from "./types";
 
 // 강원·전북은 특별자치도 전환으로 코드가 바뀌었다 (42→51, 45→52). 옛 코드가 섞여 와도 같게 본다.
@@ -13,12 +14,14 @@ type Verdict = "ok" | "unknown" | "fail";
 function checkRegion(profile: UserProfile, policy: Policy): Verdict {
   if (policy.regionCodes.includes("ALL")) return "ok";
   if (policy.regionCodes.length === 0) return "unknown";
-  const mine = normalizeRegionCode(profile.regionCode);
-  const sido = mine.slice(0, 2);
+  const code = normalizeRegionCode(profile.regionCode);
+  const sido = code.slice(0, 2);
+  // 개편 전 코드로 저장된 프로필은 새 코드(들)와도 같게 본다 (인천 중구 → 제물포구·영종구)
+  const mine = new Set([code, ...(LEGACY_SIGUNGU[code]?.now ?? [])]);
   const hit = policy.regionCodes.some((raw) => {
     const c = normalizeRegionCode(raw);
     // 시·군·구 일치 또는 상위 시·도 일치
-    return c === mine || c === sido || (c.length === 2 && c === sido);
+    return mine.has(c) || c === sido || (LEGACY_SIGUNGU[c]?.now.some((n) => mine.has(n)) ?? false);
   });
   return hit ? "ok" : "fail";
 }
@@ -61,6 +64,8 @@ export const SPECIAL_TARGETS: { label: string; re: RegExp }[] = [
   // "경기도 전역"의 '전역'은 빼고 전역 예정자·제대군인만
   { label: "군 장병·제대군인", re: /장병|제대\s*군인|군\s*복무|전역\s*(?:예정|장병|군인|간부|자)/ },
   { label: "특정 직업 종사자", re: /종사자|교직원|건설\s*노동자|운전자/ },
+  // 온통청년 혼인 여부 코드(기혼/미혼)를 지원대상 줄에 "(혼인 조건: 기혼)"으로 적어 둔다
+  { label: "혼인 여부", re: /혼인\s*조건/ },
 ];
 
 /** 정책명 + 지원대상 문장 (선정기준의 "우대" 같은 부가 조건까지 보지 않도록 지원대상만) */

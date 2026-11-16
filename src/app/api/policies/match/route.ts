@@ -27,5 +27,7 @@ export async function POST(req: Request) {
   });
   const summaries = Object.fromEntries(rows.map(({ policyId, ...s }) => [policyId, s]));
 
-  return json({ results, counts, eligibleAmount, sources, summaries });
+  // 항목별 상세·링크는 상세 화면에서만 쓰므로 목록 응답에서는 뺀다 (응답 크기 절약)
+  const light = results.map((r) => ({ ...r, policy: { ...r.policy, details: undefined, links: undefined } }));
+  return json({ results: light, counts, eligibleAmount, sources, summaries });
 }

@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { Button, cx, ErrorBox } from "@/components/ui";
 import { api, resolveProfile, saveSessionProfile } from "@/lib/client";
-import { REGIONS } from "@/lib/regions";
+import { LEGACY_SIGUNGU, REGIONS } from "@/lib/regions";
 import {
   EMPLOYMENT_STATUSES, INTERESTS, STUDENT_STATUSES,
   type EmploymentStatus, type Interest, type StudentStatus, type UserProfile,
@@ -70,7 +70,12 @@ export default function ProfilePage() {
     resolveProfile(status === "authenticated").then((p) => {
       if (!p) return;
       setD({
-        sido: p.regionCode.slice(0, 2), regionCode: p.regionCode, birthYear: String(p.birthYear),
+        // 개편 전 코드(인천 중구 등)는 새 구로 바꾸고, 둘로 나뉜 곳이면 다시 고르게 비워 둔다
+        sido: p.regionCode.slice(0, 2),
+        regionCode: LEGACY_SIGUNGU[p.regionCode]
+          ? LEGACY_SIGUNGU[p.regionCode].now.length === 1 ? LEGACY_SIGUNGU[p.regionCode].now[0] : ""
+          : p.regionCode,
+        birthYear: String(p.birthYear),
         incomeLevel: p.incomeLevel, studentStatus: p.studentStatus, employmentStatus: p.employmentStatus, interests: p.interests,
       });
     });

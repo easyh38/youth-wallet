@@ -4,6 +4,7 @@ import { ListChecks, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/client";
 import { ddayInfo } from "@/lib/format";
+import { regionLabel } from "@/lib/regions";
 import type { MatchStatus, Policy } from "@/lib/types";
 import { SaveButton } from "./save-button";
 import { SummaryLines } from "./summary-lines";
@@ -66,7 +67,12 @@ export function PolicyCard({
             {p.title}
           </button>
         </h3>
-        <p className="mt-1 text-[13px] text-ink-muted">{p.agency}</p>
+        <p className="mt-1 text-[13px] text-ink-muted">{p.agency} · {regionLabel(p.regionCodes, 2)}</p>
+        {!!p.keywords?.length && (
+          <p className="mt-1.5 flex flex-wrap gap-x-2 text-[12px] text-ink-muted">
+            {p.keywords.slice(0, 3).map((k) => <span key={k}>#{k}</span>)}
+          </p>
+        )}
       </div>
 
       <div className="mt-auto border-t border-line-soft pt-3">

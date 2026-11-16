@@ -34,7 +34,8 @@ export const REGIONS: Sido[] = [
   {
     code: "28",
     name: "인천광역시",
-    sigungu: s("28", "110:중구,140:동구,177:미추홀구,185:연수구,200:남동구,237:부평구,245:계양구,260:서구,710:강화군,720:옹진군"),
+    // 2026-07 행정체제 개편: 중구·동구 → 제물포구·영종구, 서구 → 서구·검단구 (옛 코드는 LEGACY_SIGUNGU)
+    sigungu: s("28", "125:제물포구,155:영종구,177:미추홀구,185:연수구,200:남동구,237:부평구,245:계양구,275:서구,290:검단구,710:강화군,720:옹진군"),
   },
   { code: "29", name: "광주광역시", sigungu: s("29", "110:동구,140:서구,155:남구,170:북구,200:광산구") },
   { code: "30", name: "대전광역시", sigungu: s("30", "110:동구,140:중구,170:서구,200:유성구,230:대덕구") },
@@ -58,8 +59,20 @@ export const REGIONS: Sido[] = [
   { code: "50", name: "제주특별자치도", sigungu: s("50", "110:제주시,130:서귀포시") },
 ];
 
+/**
+ * 개편 전 시·군·구 코드 → 지금 코드. 예전에 저장한 프로필과 옛 코드로 오는 공고를 지금 표에 맞춘다.
+ * 옛 인천 중구는 제물포구·영종구로 나뉘었으므로 두 곳 모두와 같게 본다.
+ */
+export const LEGACY_SIGUNGU: Record<string, { name: string; now: string[] }> = {
+  "28110": { name: "중구", now: ["28125", "28155"] },
+  "28140": { name: "동구", now: ["28125"] },
+  "28260": { name: "서구", now: ["28275", "28290"] },
+};
+
 export function regionName(code: string): string {
   const sido = REGIONS.find((r) => r.code === code.slice(0, 2));
+  const legacy = LEGACY_SIGUNGU[code];
+  if (sido && legacy) return `${sido.name} ${legacy.name}`;
   if (!sido) return code;
   if (code.length === 2) return sido.name;
   // "41:연천군" — 지역 표에 없는 시·군·구 (regionsFromAgency 참고)
@@ -80,7 +93,6 @@ export const SIDO_ALIASES: Record<string, string> = {
  * (예: "횡성인재육성장학회" → 강원 횡성군 → 다른 지역 사용자에게서 제외)
  */
 export const EXTRA_SIGUNGU: Record<string, string[]> = {
-  "28": ["영종구", "제물포구", "검단구"],
   "41": ["연천군", "가평군", "양평군"],
   "51": ["홍천군", "횡성군", "영월군", "평창군", "정선군", "철원군", "화천군", "양구군", "인제군", "고성군", "양양군"],
   "43": ["보은군", "옥천군", "영동군", "증평군", "진천군", "괴산군", "음성군", "단양군"],
@@ -90,6 +102,72 @@ export const EXTRA_SIGUNGU: Record<string, string[]> = {
   "47": ["의성군", "청송군", "영양군", "영덕군", "청도군", "고령군", "성주군", "칠곡군", "예천군", "봉화군", "울진군", "울릉군"],
   "48": ["의령군", "함안군", "창녕군", "고성군", "남해군", "하동군", "산청군", "함양군", "거창군", "합천군"],
 };
+
+/**
+ * 온통청년은 전남광주통합특별시 출범 뒤 옛 광주(29)·전남(46) 시·군·구를 12xxx 코드로 보낸다.
+ * 사용자 프로필은 옛 코드를 쓰므로 옛 코드로 되돌린다. 표에 없는 전남 군은 "46:담양군" 형태로 둔다.
+ */
+const JEONNAM_GUN = ["담양군", "곡성군", "구례군", "고흥군", "보성군", "화순군", "장흥군", "강진군", "해남군", "영암군", "무안군", "함평군", "영광군", "장성군", "완도군", "진도군", "신안군"];
+export const UNIFIED_12: Record<string, string> = {
+  "12110": "46110", "12130": "46130", "12150": "46150", "12170": "46170", "12190": "46230", // 목포·여수·순천·나주·광양
+  "12210": "29110", "12240": "29140", "12270": "29155", "12300": "29170", "12330": "29200", // 광주 동·서·남·북·광산구
+  ...Object.fromEntries(JEONNAM_GUN.map((name, i) => [String(12710 + i * 10), `46:${name}`])),
+};
+
+const TABLE_CODES = new Set(REGIONS.flatMap((r) => r.sigungu.map((g) => g.code)));
+
+/**
+ * 공공 API의 시·군·구 코드를 지역 표 기준으로 맞춘다.
+ * - 12xxx(전남광주) → 옛 광주·전남 코드
+ * - 42/45(옛 강원·전북) → 51/52
+ * - 일반구 코드(수원 장안구 41111, 창원 의창구 48121 …) → 시 코드(41110, 48120)
+ * 표에 없는 코드는 그대로 둔다 (누구의 지역 코드와도 일치하지 않는다)
+ */
+export function normalizeSigunguCode(raw: string): string {
+  if (/^\d{2}000$/.test(raw)) return normalizeSigunguCode(raw.slice(0, 2)); // "30000" = 대전 전체
+  let code = UNIFIED_12[raw] ?? raw;
+  if (LEGACY_SIGUNGU[code]) code = LEGACY_SIGUNGU[code].now[0];
+  if (code.startsWith("42") || code.startsWith("45")) code = (code.startsWith("42") ? "51" : "52") + code.slice(2);
+  if (/^\d{5}$/.test(code) && !TABLE_CODES.has(code)) {
+    const city = code.slice(0, 4) + "0";
+    if (TABLE_CODES.has(city)) return city;
+  }
+  return code;
+}
+
+/**
+ * 시·도의 표에 있는 시·군·구를 모두 포함하면 그 시·도 코드 하나로, 모든 시·도를 덮으면 ["ALL"]로 줄인다.
+ * (전국 대상 정책이 시·군·구 250여 개를 나열해 오는 경우가 많다)
+ * 여러 시·도에 걸친 목록은 개편 직후 새 구 코드가 한두 개 빠져 오는 일이 많아(인천 영종구·서구 등)
+ * 시·군·구가 8곳 이상인 시·도는 2곳까지 빠져도 그 시·도 전체로 본다.
+ */
+export function collapseRegionCodes(codes: string[]): string[] {
+  const set = new Set(codes);
+  const out: string[] = [];
+  let whole = 0;
+  const multiSido = new Set(codes.map((c) => c.slice(0, 2))).size >= 2;
+  for (const r of REGIONS) {
+    const mine = [...set].filter((c) => c.slice(0, 2) === r.code);
+    const missing = r.sigungu.filter((g) => !set.has(g.code)).length;
+    const covered = r.sigungu.length > 0 && (missing === 0 || (multiSido && r.sigungu.length >= 8 && missing <= 2));
+    if (set.has(r.code) || covered) {
+      out.push(r.code);
+      whole++;
+    } else out.push(...mine);
+  }
+  if (whole === REGIONS.length) return ["ALL"];
+  // 표에 없는 시·도 코드도 버리지 않는다
+  out.push(...[...set].filter((c) => !REGIONS.some((r) => r.code === c.slice(0, 2))));
+  return out;
+}
+
+/** 화면 표시용: "전국", "서울특별시", "경기도 수원시, 경기도 성남시 외 3곳" */
+export function regionLabel(codes: string[], max = 4): string {
+  if (codes.includes("ALL")) return "전국";
+  if (!codes.length) return "공고문 확인 필요";
+  const names = [...new Set(codes.map(regionName))];
+  return names.length > max ? `${names.slice(0, max).join(", ")} 외 ${names.length - max}곳` : names.join(", ");
+}
 
 /** 시·도의 모든 시·군·구. 표에 없는 곳은 "51:횡성군" 형태의 코드 (누구의 지역 코드와도 일치하지 않는다) */
 export function allSigungu(sidoCode: string): { code: string; name: string }[] {
