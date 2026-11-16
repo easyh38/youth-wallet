@@ -139,17 +139,28 @@ export default function PoliciesPage() {
 
   const interestCats = useMemo(() => new Set((profile?.interests ?? []).map((i) => INTEREST_TO_CATEGORY[i])), [profile]);
 
-  const visible = useMemo(() => {
+  // 분야 탭·출처·검색어까지 적용한 목록. 필터 옆 숫자도 이 목록으로 세서 화면의 카드 수와 맞춘다
+  const scoped = useMemo(() => {
     if (!data) return [];
     const filtered = data.results.filter((r) => {
-      if (statusF !== "all" && r.status !== statusF) return false;
       if (!sourceF.includes(r.policy.source)) return false;
       if (tab === "interest") return interestCats.has(r.policy.category);
       if (tab !== "all") return r.policy.category === tab;
       return true;
     });
     return searchPolicies(filtered, deferredQuery);
-  }, [data, statusF, sourceF, tab, interestCats, deferredQuery]);
+  }, [data, sourceF, tab, interestCats, deferredQuery]);
+
+  const visible = useMemo(() => (statusF === "all" ? scoped : scoped.filter((r) => r.status === statusF)), [scoped, statusF]);
+
+  const scopedCounts = useMemo(
+    () => ({
+      eligible: scoped.filter((r) => r.status === "eligible").length,
+      check: scoped.filter((r) => r.status === "check").length,
+      excluded: data?.counts.excluded ?? 0,
+    }),
+    [scoped, data],
+  );
 
   function onSearch(value: string) {
     setQuery(value);
@@ -301,7 +312,7 @@ export default function PoliciesPage() {
         {/* 데스크톱 왼쪽 필터 */}
         <aside className="hidden w-[200px] shrink-0 lg:block" aria-label="필터">
           <div className="sticky top-32">
-            {data && <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={data.counts} />}
+            {data && <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={scopedCounts} />}
             {kosaf?.fetchedAt && (
               <p className="mt-8 text-[13px] text-ink-muted">
                 장학재단 데이터 기준일 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")}
@@ -379,7 +390,7 @@ export default function PoliciesPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
-            <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={data.counts} />
+            <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={scopedCounts} />
             <button type="button" onClick={() => setSheet(false)} className="mt-6 min-h-12 w-full rounded-full bg-ink font-semibold text-paper">
               {visible.length}개 보기
             </button>

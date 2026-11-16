@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { error, json } from "@/lib/api";
 import { runDeadlineCheck } from "@/lib/notifications";
+import { warmSources } from "@/lib/policies";
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
 
@@ -21,5 +22,7 @@ export async function POST(req: Request) {
     return error(401, "unauthorized");
   }
   const result = await runDeadlineCheck();
-  return json(result);
+  // 아침 첫 사용자가 오래된 데이터를 보지 않도록 공공 API 캐시를 미리 채운다
+  const sources = await warmSources().catch((e: Error) => ({ error: e.message }));
+  return json({ ...result, sources });
 }

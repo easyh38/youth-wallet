@@ -15,6 +15,8 @@ export async function register() {
       try {
         const r = await runDeadlineCheck();
         console.log(`[cron] 마감 알림 검사 완료: 대상 ${r.checked}건, 새 알림 ${r.created}건`);
+        const { warmSources } = await import("./lib/policies");
+        console.log("[cron] 정책 캐시 미리 받기:", await warmSources());
       } catch (err) {
         console.error("[cron] 마감 알림 검사 실패:", (err as Error).message);
       }

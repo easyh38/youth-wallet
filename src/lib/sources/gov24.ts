@@ -34,18 +34,38 @@ export function isYouthService(r: Raw): boolean {
   return true;
 }
 
+const CONCURRENCY = 4;
+
+async function fetchPage(base: string, key: string, page: number): Promise<{ data: Raw[]; total: number }> {
+  const url = `${base}?page=${page}&perPage=${PER_PAGE}&returnType=JSON&serviceKey=${encodeURIComponent(key)}`;
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000), cache: "no-store" });
+      if (!res.ok) throw new Error(`gov24 HTTP ${res.status}`);
+      const json = (await res.json()) as { data?: Raw[]; totalCount?: number };
+      return { data: json.data ?? [], total: json.totalCount ?? 0 };
+    } catch (err) {
+      lastErr = err as Error;
+      // 키 오류 같은 4xx는 다시 해도 같다
+      if (/HTTP 4\d\d/.test(lastErr.message)) break;
+      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
+  throw lastErr ?? new Error("gov24: 불러오기 실패");
+}
+
 export async function fetchGov24(): Promise<Policy[]> {
   const key = process.env.GOV24_API_KEY!;
   const base = process.env.GOV24_API_URL || "https://api.odcloud.kr/api/gov24/v3/serviceList";
-  const all: Raw[] = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = `${base}?page=${page}&perPage=${PER_PAGE}&returnType=JSON&serviceKey=${encodeURIComponent(key)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000), cache: "no-store" });
-    if (!res.ok) throw new Error(`gov24 HTTP ${res.status}`);
-    const json = (await res.json()) as { data?: Raw[]; totalCount?: number };
-    const data = json.data ?? [];
-    all.push(...data);
-    if (data.length < PER_PAGE || all.length >= (json.totalCount ?? 0)) break;
+  // 첫 페이지로 전체 건수를 알고, 나머지는 몇 페이지씩 동시에 받는다
+  const first = await fetchPage(base, key, 1);
+  const all: Raw[] = [...first.data];
+  const pages = Math.min(MAX_PAGES, Math.ceil(first.total / PER_PAGE));
+  const rest = Array.from({ length: Math.max(0, pages - 1) }, (_, i) => i + 2);
+  for (let i = 0; i < rest.length; i += CONCURRENCY) {
+    const chunk = await Promise.all(rest.slice(i, i + CONCURRENCY).map((p) => fetchPage(base, key, p)));
+    for (const c of chunk) all.push(...c.data);
   }
   return all
     .filter(isYouthService)
