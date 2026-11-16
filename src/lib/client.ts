@@ -3,6 +3,7 @@
 import type { UserProfile } from "./types";
 
 const KEY = "cj.profile";
+const GUEST_KEY = "cj.guest-profile";
 
 /** 비로그인 상태에서는 브라우저 세션에만 저장한다 (PRD 6-1) */
 export function loadSessionProfile(): UserProfile | null {
@@ -14,9 +15,21 @@ export function loadSessionProfile(): UserProfile | null {
   }
 }
 
-export function saveSessionProfile(p: UserProfile) {
+export function loadAssistantGuestProfile(): UserProfile | null {
   try {
-    sessionStorage.setItem(KEY, JSON.stringify(p));
+    const raw = sessionStorage.getItem(GUEST_KEY);
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSessionProfile(p: UserProfile, owner: "guest" | "account") {
+  try {
+    if (owner === "account") sessionStorage.removeItem(GUEST_KEY);
+    const raw = JSON.stringify(p);
+    sessionStorage.setItem(KEY, raw);
+    if (owner === "guest") sessionStorage.setItem(GUEST_KEY, raw);
   } catch {
     /* 사생활 보호 모드 등 */
   }
@@ -25,6 +38,7 @@ export function saveSessionProfile(p: UserProfile) {
 export function clearSessionProfile() {
   try {
     sessionStorage.removeItem(KEY);
+    sessionStorage.removeItem(GUEST_KEY);
   } catch {}
 }
 
@@ -51,7 +65,7 @@ export async function resolveProfile(loggedIn: boolean): Promise<UserProfile | n
     try {
       const { profile } = await api<{ profile: UserProfile | null }>("/api/me/profile");
       if (profile) {
-        saveSessionProfile(profile);
+        saveSessionProfile(profile, "account");
         return profile;
       }
     } catch {}

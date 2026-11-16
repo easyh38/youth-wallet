@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { SessionProvider } from "next-auth/react";
 import { auth } from "@/auth";
 import { AppNav } from "@/components/nav";
+import { WalletAssistantProvider } from "@/components/wallet-assistant";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,8 +31,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="min-h-dvh antialiased">
         <SessionProvider session={session}>
-          <AppNav />
-          <main className="pb-24 lg:pb-16">{children}</main>
+          <WalletAssistantProvider>
+            <AppNav />
+            <main className="pb-24 lg:pb-16">{children}</main>
+          </WalletAssistantProvider>
         </SessionProvider>
       </body>
     </html>

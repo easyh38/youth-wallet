@@ -1,7 +1,8 @@
 import { error, json } from "@/lib/api";
+import { QuotaError } from "@/lib/factchat";
 import { getPolicyById } from "@/lib/policies";
 import { clientIp, rateLimit } from "@/lib/security";
-import { getFreshCachedSummary, getOrCreateSummary, QuotaError } from "@/lib/summary";
+import { getFreshCachedSummary, getOrCreateSummary } from "@/lib/summary";
 
 // "3줄 요약 보기"를 눌렀을 때만 호출된다. 캐시가 있으면 팩트챗을 부르지 않는다.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {

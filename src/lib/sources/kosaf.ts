@@ -1,15 +1,62 @@
-// 한국장학재단 학자금 지원 정보 (공공데이터포털 파일데이터 → 자동 변환 API)
+// 한국장학재단 학자금 지원 정보 (공공데이터포털 CSV 또는 자동 변환 API)
 // 수기로 모은 파일 데이터라 실시간이 아니며 일부 기관만 포함된다. 하루 1회 받아 저장한다.
 
+import { parse } from "csv-parse/sync";
+import iconv from "iconv-lite";
 import type { Policy, UnknownField } from "../types";
 import { normalizeDate } from "../date";
 import { clean, parseAmountMax, pushUnknown, regionsFromRegionText } from "./parse";
 
 type Raw = Record<string, unknown>;
 
+export function kosafConfigured() {
+  return Boolean((process.env.KOSAF_API_URL && process.env.KOSAF_API_KEY) || process.env.KOSAF_PUBLIC_FILE_URL);
+}
+
+const MAX_CSV_BYTES = 8 * 1024 * 1024;
+
+async function fetchPublicFile(url: URL): Promise<Policy[]> {
+  if (url.origin !== "https://www.data.go.kr" || url.pathname !== "/cmm/cmm/fileDownload.do" || url.username || url.password) {
+    throw new Error("kosaf: 공공데이터포털의 파일 다운로드 주소가 필요해요");
+  }
+  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15_000), cache: "no-store" });
+  if (!response.ok || !response.body) throw new Error(`kosaf CSV HTTP ${response.status}`);
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_CSV_BYTES) {
+      await reader.cancel();
+      throw new Error("kosaf: CSV 용량 제한을 넘었어요");
+    }
+    chunks.push(value);
+  }
+
+  const bytes = Buffer.concat(chunks);
+  let csv: string;
+  try {
+    csv = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    csv = iconv.decode(bytes, "cp949");
+  }
+  const rows = parse(csv, { bom: true, columns: true, skip_empty_lines: true }) as Raw[];
+  const policies = rows.filter((row) => pick(row, "번호") && pick(row, "상품명")).map(normalizeKosaf);
+  if (!policies.length) throw new Error("kosaf: CSV에서 학자금 공고를 읽지 못했어요");
+  return policies;
+}
+
 export async function fetchKosaf(): Promise<Policy[]> {
-  const url = process.env.KOSAF_API_URL!;
-  const key = process.env.KOSAF_API_KEY!;
+  const url = process.env.KOSAF_API_URL;
+  const key = process.env.KOSAF_API_KEY;
+  if (!url || !key) {
+    const fileUrl = process.env.KOSAF_PUBLIC_FILE_URL;
+    if (!fileUrl) throw new Error("kosaf: REST 또는 공개 CSV 주소를 설정해 주세요");
+    return fetchPublicFile(new URL(fileUrl));
+  }
   const all: Raw[] = [];
   for (let page = 1; page <= 10; page++) {
     const sep = url.includes("?") ? "&" : "?";

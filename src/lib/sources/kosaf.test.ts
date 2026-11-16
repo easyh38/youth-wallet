@@ -1,5 +1,26 @@
-import { describe, expect, it } from "vitest";
-import { repairUrl } from "./kosaf";
+import iconv from "iconv-lite";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchKosaf, repairUrl } from "./kosaf";
+
+describe("장학재단 공개 원본 파일", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("CP949와 여러 줄로 된 공고를 기존 정책 형식으로 읽는다", async () => {
+    vi.stubEnv("KOSAF_API_KEY", undefined);
+    vi.stubEnv("KOSAF_PUBLIC_FILE_URL", "https://www.data.go.kr/cmm/cmm/fileDownload.do?fileDetailSn=1");
+    const csv = "번호,운영기관명,상품명,지원내역 상세내용,모집종료일\r\n"
+      + '314,한국장학재단,근로장학금,"교내, 교외 장학금\r\n근로 시간에 따라 지급",2027-02-28';
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(Uint8Array.from(iconv.encode(csv, "cp949")))));
+
+    const [policy] = await fetchKosaf();
+    expect(policy).toMatchObject({ id: "kosaf-314", source: "kosaf", title: "근로장학금", applyEnd: "2027-02-28" });
+    expect(policy.summaryRaw).toContain("교내, 교외 장학금");
+    expect(policy.summaryRaw).toContain("근로 시간에 따라 지급");
+  });
+});
 
 describe("repairUrl (장학재단 홈페이지 주소 수리)", () => {
   it('"?" 빠진 재단 상품 주소를 고친다', () => {

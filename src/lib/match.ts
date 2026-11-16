@@ -130,6 +130,13 @@ export function matchPolicy(profile: UserProfile, policy: Policy, today: string 
 
 export type MatchedPolicy = { policy: Policy } & MatchResult;
 
+/** 신청 가능 정책의 공고에서 숫자로 확인된 상한만 더한다. */
+export function eligibleAmountOf(results: readonly MatchedPolicy[]): number {
+  return results.reduce((sum, { policy, status }) => (
+    status === "eligible" ? sum + (policy.amountMax ?? 0) : sum
+  ), 0);
+}
+
 /** 신청 가능 → 확인 필요, 각 그룹 안에서 마감 임박순, 상시 모집·마감일 미정은 맨 뒤 */
 export function sortMatched(list: MatchedPolicy[]): MatchedPolicy[] {
   const rank: Record<MatchStatus, number> = { eligible: 0, check: 1, excluded: 2 };

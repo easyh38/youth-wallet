@@ -5,7 +5,7 @@ import { kstDate } from "./date";
 import { dedupePolicies } from "./dedupe";
 import { prisma } from "./db";
 import { fetchGov24 } from "./sources/gov24";
-import { fetchKosaf, kosafCacheCurrent } from "./sources/kosaf";
+import { fetchKosaf, kosafCacheCurrent, kosafConfigured } from "./sources/kosaf";
 import { samplePolicies } from "./sources/sample";
 import { isPublicFetchUrl, safeHttpUrl } from "./security";
 import { fetchYouth } from "./sources/youth";
@@ -15,7 +15,7 @@ const HOUR = 3_600_000;
 
 type SourceConfig = {
   ttl: number;
-  hasKey: () => boolean;
+  configured: () => boolean;
   fetch: () => Promise<Policy[]>;
   /** 캐시가 지금 코드의 형식으로 저장됐는지. 아니면 만료 전이라도 다시 받는다 */
   current?: (cached: Policy[]) => boolean;
@@ -23,11 +23,11 @@ type SourceConfig = {
 
 const SOURCES: Record<Source, SourceConfig> = {
   // 항목별 상세(details)가 없는 옛 형식 캐시는 다시 받는다
-  youth: { ttl: 6 * HOUR, hasKey: () => !!process.env.YOUTH_API_KEY, fetch: fetchYouth, current: (c) => !c.length || !!c[0].details },
-  gov24: { ttl: 6 * HOUR, hasKey: () => !!process.env.GOV24_API_KEY, fetch: fetchGov24 },
+  youth: { ttl: 6 * HOUR, configured: () => !!process.env.YOUTH_API_KEY, fetch: fetchYouth, current: (c) => !c.length || !!c[0].details },
+  gov24: { ttl: 6 * HOUR, configured: () => !!process.env.GOV24_API_KEY, fetch: fetchGov24 },
   kosaf: {
     ttl: 24 * HOUR,
-    hasKey: () => !!process.env.KOSAF_API_KEY && !!process.env.KOSAF_API_URL,
+    configured: kosafConfigured,
     fetch: fetchKosaf,
     current: kosafCacheCurrent,
   },
@@ -144,7 +144,7 @@ const toLoaded = (source: Source, e: Entry, ok = true): Loaded => ({
  */
 async function loadSource(source: Source): Promise<Loaded> {
   const cfg = SOURCES[source];
-  if (!cfg.hasKey()) {
+  if (!cfg.configured()) {
     const policies = samplePolicies(source);
     return { policies, status: { source, ok: true, isSample: true, fetchedAt: new Date().toISOString(), count: policies.length } };
   }
@@ -170,7 +170,7 @@ export async function warmSources(): Promise<Record<Source, string>> {
   await Promise.all(
     (Object.keys(SOURCES) as Source[]).map(async (source) => {
       const cfg = SOURCES[source];
-      if (!cfg.hasKey()) return void (out[source] = "sample");
+      if (!cfg.configured()) return void (out[source] = "sample");
       const cached = await readCache(source);
       // 다음 스케줄 전에 만료되지 않도록 TTL의 절반이 지났으면 새로 받는다
       if (cached?.current && Date.now() - cached.fetchedAt.getTime() < cfg.ttl / 2) return void (out[source] = "fresh");

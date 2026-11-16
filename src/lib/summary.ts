@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "./db";
-import { kstDate } from "./date";
+import { completeFactchat, factchatConfigured, reserveFactchatCall } from "./factchat";
 import { isPublicFetchUrl } from "./security";
 import type { Policy, Summary } from "./types";
 
@@ -131,56 +131,18 @@ export async function buildInput(policy: Policy): Promise<string> {
 
 export const hashInput = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 32);
 
-// ─── 호출량 보호 ───
-
-export class QuotaError extends Error {}
-
-function dailyLimit() {
-  return Math.max(1, Number(process.env.FACTCHAT_DAILY_LIMIT) || 1000);
-}
-
-async function reserveCall() {
-  const date = kstDate();
-  const limit = Math.floor(dailyLimit() * 0.9);
-  const row = await prisma.apiUsage.upsert({ where: { date }, create: { date, count: 0 }, update: {} });
-  if (row.count >= limit) throw new QuotaError("오늘 AI 요약 한도에 거의 도달했어요. 원문에서 내용을 확인해 주세요.");
-  await prisma.apiUsage.update({ where: { date }, data: { count: { increment: 1 } } });
-}
-
 // ─── 팩트챗 호출 ───
 
-export function factchatConfigured() {
-  return !!(process.env.FACTCHAT_API_URL && process.env.FACTCHAT_API_KEY && process.env.FACTCHAT_MODEL);
-}
-
 async function callFactchat(input: string, policy: Policy): Promise<string> {
-  const header = process.env.FACTCHAT_AUTH_HEADER || "Authorization";
-  const prefix = process.env.FACTCHAT_AUTH_PREFIX ?? "Bearer ";
-  const userContent: unknown =
+  const userContent =
     process.env.FACTCHAT_ACCEPTS_PDF === "true" && policy.attachmentUrls.length
-      ? [{ type: "text", text: input }, ...policy.attachmentUrls.slice(0, 2).map((url) => ({ type: "file", file: { url } }))]
+      ? [{ type: "text" as const, text: input }, ...policy.attachmentUrls.slice(0, 2).map((url) => ({ type: "file" as const, file: { url } }))]
       : input;
 
-  const res = await fetch(process.env.FACTCHAT_API_URL!, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", [header]: `${prefix}${process.env.FACTCHAT_API_KEY}` },
-    body: JSON.stringify({
-      model: process.env.FACTCHAT_MODEL,
-      temperature: 0.1,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userContent },
-      ],
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`FactChat HTTP ${res.status}`);
-  const json = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-    output_text?: string;
-    content?: { text?: string }[];
-  };
-  return json.choices?.[0]?.message?.content ?? json.output_text ?? json.content?.[0]?.text ?? "";
+  return completeFactchat([
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: userContent },
+  ]);
 }
 
 export function parseSummaryJson(text: string): Summary | null {
@@ -278,11 +240,11 @@ async function createSummary(policy: Policy): Promise<SummaryResult> {
 
   let summary: Summary | null;
   if (engine === "factchat") {
-    await reserveCall();
+    await reserveFactchatCall();
     summary = parseSummaryJson(await callFactchat(input, policy));
     if (!summary) {
       // JSON 파싱 실패 시 1번만 다시 시도
-      await reserveCall();
+      await reserveFactchatCall();
       summary = parseSummaryJson(await callFactchat(input, policy));
     }
     if (!summary) throw new Error("AI 요약 결과를 읽지 못했어요. 잠시 후 다시 시도해 주세요.");

@@ -7,11 +7,13 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { PolicyCard, type CardSummary } from "@/components/policy-card";
 import { PolicyDetail } from "@/components/policy-detail";
 import { Button, ButtonLink, cx, EmptyState, ErrorBox, PolicyCardSkeleton } from "@/components/ui";
+import { AssistantPolicyContext } from "@/components/wallet-assistant";
 import { api, resolveProfile } from "@/lib/client";
 import { formatWon } from "@/lib/format";
 import type { MatchedPolicy } from "@/lib/match";
 import { regionName } from "@/lib/regions";
 import { searchPolicies } from "@/lib/search";
+import type { AssistantPolicyQuery } from "@/lib/wallet-assistant";
 import {
   CATEGORY_LABEL, INTEREST_TO_CATEGORY, SOURCE_LABEL,
   type Category, type MatchStatus, type Source, type UserProfile,
@@ -152,6 +154,15 @@ export default function PoliciesPage() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const searching = deferredQuery.trim().length > 0;
+  const panelOpen = isDesktop && !!selected;
+  const assistantQuery = useMemo<AssistantPolicyQuery>(() => ({
+    category: tab !== "all" && tab !== "interest" ? tab : undefined,
+    search: deferredQuery.trim().slice(0, 200) || undefined,
+    selectedPolicyId: panelOpen && selected && selected.length <= 240 ? selected : undefined,
+    status: statusF === "eligible" || statusF === "check" ? statusF : undefined,
+    sources: sourceF.length < 3 ? sourceF : undefined,
+    interests: tab === "interest" || undefined,
+  }), [tab, deferredQuery, panelOpen, selected, statusF, sourceF]);
   // 분야·필터·검색어가 바뀌면 다시 PAGE개부터 보여준다 (key가 다르면 n을 무시)
   const filterKey = `${tab}|${statusF}|${sourceF.join(",")}|${deferredQuery.trim()}`;
   const [paging, setPaging] = useState({ key: "", n: PAGE });
@@ -255,7 +266,7 @@ export default function PoliciesPage() {
   // Esc: 필터 시트 → 상세 패널 순서로 닫는다 (검색창에서 검색어를 지울 때는 제외)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("dialog:modal")) return;
       if (sheet) closeSheet();
       else if (isDesktop && selected) closePanel();
     };
@@ -305,10 +316,10 @@ export default function PoliciesPage() {
   const sample = data?.sources.filter((s) => s.isSample) ?? [];
   const failed = data?.sources.filter((s) => !s.ok) ?? [];
   const kosaf = data?.sources.find((s) => s.source === "kosaf");
-  const panelOpen = isDesktop && !!selected;
 
   return (
     <div className="mx-auto max-w-[1200px] px-4 py-8 lg:px-6">
+      <AssistantPolicyContext value={assistantQuery} />
       {/* 요약 숫자 */}
       <section className="mb-8 flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -431,7 +442,7 @@ export default function PoliciesPage() {
             {data && <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={scopedCounts} />}
             {kosaf?.fetchedAt && (
               <p className="mt-8 text-[13px] text-ink-muted">
-                장학재단 데이터 기준일 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")}
+                장학재단 데이터를 가져온 날짜 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")}
                 <br />실시간이 아니며 일부 기관만 포함돼요.
               </p>
             )}
@@ -486,7 +497,7 @@ export default function PoliciesPage() {
           ))}
           {kosaf?.fetchedAt && (
             <p className="mt-8 text-[13px] text-ink-muted lg:hidden">
-              장학재단 데이터 기준일 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")} · 실시간이 아니며 일부 기관만 포함돼요.
+              장학재단 데이터를 가져온 날짜 {new Date(kosaf.fetchedAt).toLocaleDateString("ko-KR")} · 실시간이 아니며 일부 기관만 포함돼요.
             </p>
           )}
         </section>

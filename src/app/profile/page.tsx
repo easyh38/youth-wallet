@@ -101,7 +101,7 @@ export default function ProfilePage() {
     setSaving(true);
     setErr("");
     try {
-      saveSessionProfile(profile);
+      saveSessionProfile(profile, status === "authenticated" ? "account" : "guest");
       if (status === "authenticated") await api("/api/me/profile", { method: "PUT", json: profile });
       router.push("/policies");
     } catch (e) {
