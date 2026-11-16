@@ -2,9 +2,10 @@ import "server-only";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { after } from "next/server";
 import { kstDate } from "./date";
+import { dedupePolicies } from "./dedupe";
 import { prisma } from "./db";
 import { fetchGov24 } from "./sources/gov24";
-import { fetchKosaf } from "./sources/kosaf";
+import { fetchKosaf, kosafCacheCurrent } from "./sources/kosaf";
 import { samplePolicies } from "./sources/sample";
 import { isPublicFetchUrl, safeHttpUrl } from "./security";
 import { fetchYouth } from "./sources/youth";
@@ -28,6 +29,7 @@ const SOURCES: Record<Source, SourceConfig> = {
     ttl: 24 * HOUR,
     hasKey: () => !!process.env.KOSAF_API_KEY && !!process.env.KOSAF_API_URL,
     fetch: fetchKosaf,
+    current: kosafCacheCurrent,
   },
 };
 
@@ -182,8 +184,6 @@ export async function warmSources(): Promise<Record<Source, string>> {
   return out;
 }
 
-const norm = (s: string) => s.replace(/[\s()[\]·\-_]/g, "").toLowerCase();
-
 const FALLBACK_URL: Record<Source, string> = {
   youth: "https://www.youthcenter.go.kr",
   gov24: "https://www.gov.kr",
@@ -213,22 +213,15 @@ export function sanitizePolicy(p: Policy): Policy {
   };
 }
 
-/** 정책명 + 기관명이 같으면 하나로 합친다. 온통청년 → 보조금24 → 장학재단 순으로 우선 */
-export function dedupe(lists: Policy[][]): Policy[] {
-  const seen = new Map<string, Policy>();
-  for (const list of lists) {
-    for (const p of list) {
-      if (!p.title) continue;
-      const key = `${norm(p.title)}|${norm(p.agency)}`;
-      if (!seen.has(key)) seen.set(key, sanitizePolicy(p));
-    }
-  }
-  return [...seen.values()];
+let merged: { key: string; policies: Policy[]; aliases: Map<string, string> } | null = null;
+
+/** 겹쳐서 합친 정책은 앞 출처(온통청년 → 보조금24 → 장학재단) 것을 남긴다. 기준은 dedupe.ts */
+function mergeLists(lists: Policy[][]) {
+  const { policies, aliases } = dedupePolicies(lists);
+  return { policies: policies.map(sanitizePolicy), aliases };
 }
 
 /** 세 출처를 동시에 불러온다. 하나가 실패해도 나머지는 그대로 돌려준다. */
-let merged: { key: string; policies: Policy[] } | null = null;
-
 export async function getAllPolicies(): Promise<{ policies: Policy[]; sources: SourceStatus[] }> {
   const order: Source[] = ["youth", "gov24", "kosaf"];
   const settled = await Promise.allSettled(order.map(loadSource));
@@ -246,11 +239,13 @@ export async function getAllPolicies(): Promise<{ policies: Policy[]; sources: S
   // 세 출처가 그대로면 합치기·정리(약 1.5만 건)를 다시 하지 않는다
   // 샘플 데이터는 오늘 날짜 기준으로 만들어지므로 날짜도 키에 넣는다
   const key = kstDate() + "|" + sources.map((s) => `${s.source}:${s.isSample ? "sample" : s.fetchedAt}:${s.count}`).join("|");
-  if (merged?.key !== key) merged = { key, policies: dedupe(lists) };
+  if (merged?.key !== key) merged = { key, ...mergeLists(lists) };
   return { policies: merged.policies, sources };
 }
 
 export async function getPolicyById(id: string): Promise<Policy | null> {
   const { policies } = await getAllPolicies();
-  return policies.find((p) => p.id === id) ?? null;
+  // 다른 출처의 같은 정책과 합쳐진 ID로 들어와도 (예전에 저장·공유한 링크) 남은 정책을 보여준다
+  const target = merged?.aliases.get(id) ?? id;
+  return policies.find((p) => p.id === target) ?? null;
 }

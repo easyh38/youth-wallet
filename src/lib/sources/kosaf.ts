@@ -26,6 +26,41 @@ export async function fetchKosaf(): Promise<Policy[]> {
   return all.map(normalizeKosaf);
 }
 
+const KOSAF_HOME = "https://www.kosaf.go.kr";
+
+/** 주소 바로 뒤에 "?" 없이 붙은 파라미터 ("scholar.dopg=…") */
+const MISSING_QUERY = /\.(do|jsp|php|aspx?|html?)(?=[A-Za-z_][\w-]*=)/i;
+
+/**
+ * 파일데이터를 사람이 직접 입력해서 홈페이지 주소가 깨져 오는 경우가 많다. 알아볼 수 있는 것만 고친다.
+ * - "…/scholar.dopg=x&naviParam=y" → "…/scholar.do?pg=x&naviParam=y" (재단 자체 상품 대부분이 이렇다)
+ * - "http//", "https:/", "http;//", "htps://", "https:abc" → 올바른 http(s)://
+ * - "www.abc.or.kr"처럼 http가 빠진 주소 → "http://…"를 붙인다 (오래된 기관 사이트는 https가 안 되기도 한다)
+ * - "3. https://…"처럼 앞에 다른 글자가 붙은 주소 → 주소만
+ * 주소로 볼 수 없으면 ("해당없음" 등) 빈 문자열
+ */
+export function repairUrl(raw: string): string {
+  let u = raw.trim();
+  const inText = u.match(/https?:\/\/\S+/i);
+  if (inText) u = inText[0];
+  // 깨진 http(s) 머리: 구분 문자(: ; /)가 하나는 있어야 한다 ("httpbin.org" 같은 도메인을 건드리지 않도록)
+  u = u.replace(/^(h?t?tps?)(?:[:;]+\/*|\/+)/i, (_, scheme: string) => (/s$/i.test(scheme) ? "https://" : "http://"));
+  if (!/^https?:\/\//i.test(u)) {
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/|$)/i.test(u)) return "";
+    u = "http://" + u;
+  }
+  if (!u.includes("?")) {
+    // 일부 구청은 사이트 이름을 확장자로 쓴다 ("dongnae.go.kr/index.dongnae?contentsSid=…")
+    const site = u.match(/^https?:\/\/(?:www\.)?([a-z0-9-]+)\./i)?.[1];
+    const own = site && new RegExp(`\\.(${site})(?=[A-Za-z_][\\w-]*=)`, "i");
+    u = own && own.test(u) ? u.replace(own, ".$1?") : u.replace(MISSING_QUERY, ".$1?");
+  }
+  return u;
+}
+
+/** 위 수리를 하기 전에 저장된 캐시는 다시 받는다 */
+export const kosafCacheCurrent = (cached: Policy[]) => cached.every((p) => /^https?:\/\//i.test(p.detailUrl) && !(!p.detailUrl.includes("?") && MISSING_QUERY.test(p.detailUrl)));
+
 const pick = (r: Raw, ...keys: string[]) => keys.map((k) => clean(r[k])).find(Boolean) ?? "";
 
 export function normalizeKosaf(r: Raw, index = 0): Policy {
@@ -77,7 +112,7 @@ export function normalizeKosaf(r: Raw, index = 0): Policy {
     applyEnd: end,
     isAlwaysOpen: false,
     summaryRaw,
-    detailUrl: pick(r, "홈페이지 주소") || "https://www.kosaf.go.kr",
+    detailUrl: repairUrl(pick(r, "홈페이지 주소")) || KOSAF_HOME,
     attachmentUrls: [],
     unknownFields: unknown,
     amountMax: parseAmountMax(support),
