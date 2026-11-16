@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { safeNext } from "./redirect";
-import { isPublicFetchUrl, rateLimit, safeHttpUrl } from "./security";
+import { clientIp, isPublicFetchUrl, rateLimit, safeHttpUrl } from "./security";
 
 describe("safeNext", () => {
   it("사이트 안 경로는 그대로", () => {
@@ -52,5 +52,17 @@ describe("rateLimit", () => {
     const third = rateLimit(key, 2, 60_000);
     expect(third.ok).toBe(false);
     expect(third.retryAfter).toBeGreaterThan(0);
+  });
+});
+
+describe("clientIp", () => {
+  const h = (o: Record<string, string>) => new Headers(o);
+  it("플랫폼이 채우는 헤더를 사용자가 보낼 수 있는 x-forwarded-for보다 먼저 본다", () => {
+    expect(clientIp(h({ "x-forwarded-for": "1.1.1.1", "x-vercel-forwarded-for": "2.2.2.2" }))).toBe("2.2.2.2");
+    expect(clientIp(h({ "x-forwarded-for": "1.1.1.1", "x-real-ip": "3.3.3.3" }))).toBe("3.3.3.3");
+  });
+  it("다른 헤더가 없으면 x-forwarded-for 첫 값, 그것도 없으면 local", () => {
+    expect(clientIp(h({ "x-forwarded-for": "1.1.1.1, 10.0.0.1" }))).toBe("1.1.1.1");
+    expect(clientIp(h({}))).toBe("local");
   });
 });

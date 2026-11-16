@@ -49,6 +49,12 @@ export function rateLimit(key: string, limit: number, windowMs: number): { ok: b
 }
 
 /** 요청자 IP (프록시 뒤라면 첫 번째 X-Forwarded-For) */
+/**
+ * 요청한 사람의 IP (횟수 제한용).
+ * x-forwarded-for의 첫 값은 사용자가 직접 써 보낼 수 있으므로, 배포 플랫폼이 채우는 헤더를 먼저 본다.
+ * (Vercel: x-vercel-forwarded-for, 일반 리버스 프록시: x-real-ip)
+ */
 export function clientIp(headers: Headers): string {
-  return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip") || "local";
+  const first = (name: string) => headers.get(name)?.split(",")[0]?.trim();
+  return first("x-vercel-forwarded-for") || first("x-real-ip") || first("x-forwarded-for") || "local";
 }

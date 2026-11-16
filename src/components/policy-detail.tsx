@@ -18,6 +18,16 @@ type Detail = {
   saved: { id: string; status: string; checklist: ChecklistItemT[] } | null;
 };
 
+/** 공고 페이지가 아니라 사이트 첫 화면 주소인지 ("https://www.kosaf.go.kr/") */
+function isSiteHome(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return /^\/?(index\.\w+)?$/.test(u.pathname) && !u.search;
+  } catch {
+    return false;
+  }
+}
+
 export function PolicyDetail({
   id, onClose, onSavedChange, onSummary,
 }: {
@@ -78,6 +88,7 @@ export function PolicyDetail({
   const deadlineMismatch = !!summary?.deadline && !!p.applyEnd && summary.deadline !== p.applyEnd;
   const regions = regionLabel(p.regionCodes, 6);
   const links = (p.links ?? []).filter((l) => l.url !== p.detailUrl);
+  const homeOnly = isSiteHome(p.detailUrl);
 
   return (
     <article className="flex flex-col gap-8 p-5 sm:p-6">
@@ -111,7 +122,7 @@ export function PolicyDetail({
         )}
         <div className="flex items-center gap-3">
           <ButtonLink href={p.detailUrl} target="_blank" rel="noopener noreferrer" variant="accent" className="flex-1 sm:flex-none">
-            원문 보고 신청하기 <ExternalLink size={16} aria-hidden />
+            {homeOnly ? "기관 홈페이지에서 확인" : "원문 보고 신청하기"} <ExternalLink size={16} aria-hidden />
           </ButtonLink>
           <SaveButton
             policyId={p.id}
@@ -202,16 +213,19 @@ export function PolicyDetail({
         ) : (
           <p className="text-sm whitespace-pre-line text-ink-muted">{p.summaryRaw || "원문 사이트에서 확인해 주세요."}</p>
         )}
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
-          <a href={p.detailUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-info underline underline-offset-4">
-            원문 링크 열기 <ExternalLink size={14} aria-hidden />
-          </a>
-          {links.map((l) => (
-            <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-info underline underline-offset-4">
-              {l.label} <ExternalLink size={14} aria-hidden />
-            </a>
-          ))}
-        </div>
+        {homeOnly && (
+          <p className="text-[13px] text-ink-muted">이 정책은 공고 페이지 주소가 없어 기관 홈페이지로 연결돼요. 홈페이지에서 정책 이름으로 찾아보세요.</p>
+        )}
+        {/* 위 버튼과 같은 원문 링크는 다시 넣지 않고, 신청 페이지 같은 추가 링크만 보여준다 */}
+        {links.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+            {links.map((l) => (
+              <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-info underline underline-offset-4">
+                {l.label} <ExternalLink size={14} aria-hidden />
+              </a>
+            ))}
+          </div>
+        )}
       </section>
     </article>
   );

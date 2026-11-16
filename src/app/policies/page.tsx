@@ -3,10 +3,10 @@
 import { Info, Search, SlidersHorizontal, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { PolicyCard, type CardSummary } from "@/components/policy-card";
 import { PolicyDetail } from "@/components/policy-detail";
-import { ButtonLink, cx, EmptyState, ErrorBox, PolicyCardSkeleton } from "@/components/ui";
+import { Button, ButtonLink, cx, EmptyState, ErrorBox, PolicyCardSkeleton } from "@/components/ui";
 import { api, resolveProfile } from "@/lib/client";
 import { formatWon } from "@/lib/format";
 import type { MatchedPolicy } from "@/lib/match";
@@ -30,6 +30,47 @@ type Tab = "all" | "interest" | Category;
 type StatusFilter = "all" | MatchStatus;
 
 const CATEGORIES: Category[] = ["housing", "scholarship", "job", "startup", "welfare", "etc"];
+
+/** 처음에 보여줄 카드 수. "더 보기"를 누를 때마다 이만큼 늘린다 (400여 개를 한 번에 그리면 무겁다) */
+const PAGE = 30;
+
+/**
+ * 상세 화면에 갔다가 뒤로 왔을 때 목록을 그대로 되살리기 위한 기억.
+ * 앱 안에서 이동하는 동안은 이 모듈이 그대로 살아 있다 (새로고침하면 사라지고 새로 받는다).
+ * 매칭 결과가 커서 sessionStorage(5MB 제한) 대신 메모리에 둔다.
+ */
+type View = {
+  profileKey: string;
+  savedAt: number;
+  data: MatchResponse;
+  tab: Tab;
+  statusF: StatusFilter;
+  sourceF: Source[];
+  query: string;
+  paging: { key: string; n: number };
+  selected: string | null;
+  scrollY: number;
+};
+let lastView: View | null = null;
+const VIEW_TTL = 10 * 60_000;
+
+const FOCUSABLE = 'button:not([disabled]):not([tabindex="-1"]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** 열린 시트 안에서만 Tab 포커스가 돌게 한다 */
+function trapTab(e: React.KeyboardEvent<HTMLElement>) {
+  if (e.key !== "Tab") return;
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
 
 function useIsDesktop() {
   const [desk, setDesk] = useState(false);
@@ -111,6 +152,15 @@ export default function PoliciesPage() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const searching = deferredQuery.trim().length > 0;
+  // 분야·필터·검색어가 바뀌면 다시 PAGE개부터 보여준다 (key가 다르면 n을 무시)
+  const filterKey = `${tab}|${statusF}|${sourceF.join(",")}|${deferredQuery.trim()}`;
+  const [paging, setPaging] = useState({ key: "", n: PAGE });
+  const shownCount = paging.key === filterKey ? paging.n : PAGE;
+
+  const filterBtn = useRef<HTMLButtonElement>(null);
+  const restoreY = useRef<number | null>(null);
+  const scrollY = useRef(0);
+  const viewRef = useRef<Omit<View, "scrollY" | "savedAt"> | null>(null);
 
   const run = useCallback(async (p: UserProfile) => {
     setErr("");
@@ -127,6 +177,19 @@ export default function PoliciesPage() {
     resolveProfile(authStatus === "authenticated").then((p) => {
       if (!p) return router.replace("/profile");
       setProfile(p);
+      // 같은 조건으로 방금 보던 목록이 있으면 다시 요청하지 않고 그대로 되살린다
+      const v = lastView;
+      if (v && v.profileKey === JSON.stringify(p) && Date.now() - v.savedAt < VIEW_TTL) {
+        setData(v.data);
+        setTab(v.tab);
+        setStatusF(v.statusF);
+        setSourceF(v.sourceF);
+        setQuery(v.query);
+        setPaging(v.paging);
+        setSelected(v.selected);
+        restoreY.current = v.scrollY;
+        return;
+      }
       if (p.interests.length) setTab("interest");
       run(p);
     });
@@ -152,6 +215,53 @@ export default function PoliciesPage() {
   }, [data, sourceF, tab, interestCats, deferredQuery]);
 
   const visible = useMemo(() => (statusF === "all" ? scoped : scoped.filter((r) => r.status === statusF)), [scoped, statusF]);
+  const shown = visible.slice(0, shownCount);
+
+  // 지금 화면 상태를 기억해 두었다가, 이 화면을 떠날 때 저장한다
+  useEffect(() => {
+    viewRef.current = profile && data
+      ? { profileKey: JSON.stringify(profile), data, tab, statusF, sourceF, query, paging: { key: filterKey, n: shownCount }, selected }
+      : null;
+  });
+  useEffect(() => {
+    const onScroll = () => (scrollY.current = window.scrollY);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (viewRef.current) lastView = { ...viewRef.current, scrollY: scrollY.current, savedAt: Date.now() };
+    };
+  }, []);
+
+  // 되살린 목록이 다 그려진 뒤 (검색어 반영까지 끝난 뒤) 스크롤 위치를 되돌린다
+  useEffect(() => {
+    if (restoreY.current === null || !data || deferredQuery !== query) return;
+    const y = restoreY.current;
+    restoreY.current = null;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [data, deferredQuery, query, shownCount]);
+
+  const closeSheet = useCallback(() => {
+    setSheet(false);
+    filterBtn.current?.focus();
+  }, []);
+
+  const closePanel = useCallback(() => {
+    const id = selected;
+    setSelected(null);
+    // 닫은 뒤 그 정책 카드로 포커스를 돌려준다
+    if (id) document.querySelector<HTMLElement>(`[data-policy-id="${CSS.escape(id)}"]`)?.focus();
+  }, [selected]);
+
+  // Esc: 필터 시트 → 상세 패널 순서로 닫는다 (검색창에서 검색어를 지울 때는 제외)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (sheet) closeSheet();
+      else if (isDesktop && selected) closePanel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sheet, selected, isDesktop, closeSheet, closePanel]);
 
   const scopedCounts = useMemo(
     () => ({
@@ -255,7 +365,12 @@ export default function PoliciesPage() {
             type="search"
             value={query}
             onChange={(e) => onSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && onSearch("")}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                onSearch("");
+              }
+            }}
             placeholder="정책 이름으로 찾기 (예: 학자금 대출, 월세)"
             autoComplete="off"
             enterKeyHint="search"
@@ -298,6 +413,7 @@ export default function PoliciesPage() {
           ))}
         </div>
         <button
+          ref={filterBtn}
           type="button"
           onClick={() => setSheet(true)}
           className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm font-medium lg:hidden"
@@ -326,7 +442,7 @@ export default function PoliciesPage() {
         <section className="min-w-0 flex-1" aria-label="정책 목록" aria-busy={!data}>
           <div className={cx("grid gap-4", panelOpen ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3")}>
             {!data && !err && Array.from({ length: 6 }, (_, i) => <PolicyCardSkeleton key={i} />)}
-            {visible.map((r) => (
+            {shown.map((r) => (
               <PolicyCard
                 key={r.policy.id}
                 policy={r.policy}
@@ -341,6 +457,16 @@ export default function PoliciesPage() {
               />
             ))}
           </div>
+          {visible.length > shown.length && (
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <Button variant="secondary" onClick={() => setPaging({ key: filterKey, n: shownCount + PAGE })}>
+                더 보기
+              </Button>
+              <p className="tnum text-[13px] text-ink-muted" aria-live="polite">
+                {visible.length}개 중 {shown.length}개
+              </p>
+            </div>
+          )}
           {data && visible.length === 0 && (searching ? (
             <EmptyState
               title={`‘${deferredQuery.trim()}’에 맞는 정책이 없어요`}
@@ -371,7 +497,7 @@ export default function PoliciesPage() {
             <PolicyDetail
               key={selected}
               id={selected!}
-              onClose={() => setSelected(null)}
+              onClose={closePanel}
               onSavedChange={(s) => setSaved(selected!, s)}
               onSummary={(s) => setSummary(selected!, s)}
             />
@@ -381,17 +507,17 @@ export default function PoliciesPage() {
 
       {/* 모바일 하단 시트 필터 */}
       {sheet && data && (
-        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="필터">
-          <button type="button" aria-label="필터 닫기" className="anim-fade absolute inset-0 bg-black/40" onClick={() => setSheet(false)} />
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="필터" onKeyDown={trapTab}>
+          <button type="button" aria-label="필터 닫기" tabIndex={-1} className="anim-fade absolute inset-0 bg-black/40" onClick={closeSheet} />
           <div className="anim-sheet absolute inset-x-0 bottom-0 rounded-t-2xl bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-[17px] font-semibold">필터</h2>
-              <button type="button" onClick={() => setSheet(false)} aria-label="닫기" className="-m-2 inline-flex h-11 w-11 items-center justify-center rounded-full hover:bg-line-soft">
+              <button type="button" onClick={closeSheet} aria-label="닫기" autoFocus className="-m-2 inline-flex h-11 w-11 items-center justify-center rounded-full hover:bg-line-soft">
                 <X size={20} aria-hidden />
               </button>
             </div>
             <Filters status={statusF} setStatus={setStatusF} sources={sourceF} setSources={setSourceF} counts={scopedCounts} />
-            <button type="button" onClick={() => setSheet(false)} className="mt-6 min-h-12 w-full rounded-full bg-ink font-semibold text-paper">
+            <button type="button" onClick={closeSheet} className="mt-6 min-h-12 w-full rounded-full bg-ink font-semibold text-paper">
               {visible.length}개 보기
             </button>
           </div>

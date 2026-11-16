@@ -63,7 +63,7 @@ export function PolicyCard({
 
       <div>
         <h3 className="text-[17px] leading-snug font-semibold tracking-[-0.01em]">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(); }} className="text-left hover:underline hover:underline-offset-4">
+          <button type="button" data-policy-id={p.id} onClick={(e) => { e.stopPropagation(); onOpen(); }} className="text-left hover:underline hover:underline-offset-4">
             {p.title}
           </button>
         </h3>
